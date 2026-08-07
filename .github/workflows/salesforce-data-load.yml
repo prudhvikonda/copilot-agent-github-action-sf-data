@@ -31,7 +31,7 @@ jobs:
     env:
       REPO_ROOT: ${{ github.workspace }}
       SOURCE_FILE: data/account-names.csv
-      ARTIFACT_DIR: ${{ runner.temp }}/salesforce-artifacts
+      ARTIFACT_DIR: /tmp/salesforce-artifacts
       WORKFLOW_NAME: ${{ github.workflow }}
       WORKFLOW_RUN_ID: ${{ github.run_id }}
       GITHUB_REF: ${{ github.ref }}
@@ -166,8 +166,8 @@ jobs:
       - name: Load accounts into Salesforce
         shell: bash
         env:
-          INPUT_FILE: ${{ runner.temp }}/salesforce-artifacts/transformed-accounts.csv
-          OUTPUT_FILE: ${{ runner.temp }}/salesforce-artifacts/salesforce-import-results.json
+          INPUT_FILE: /tmp/salesforce-artifacts/transformed-accounts.csv
+          OUTPUT_FILE: /tmp/salesforce-artifacts/salesforce-import-results.json
         run: |
           set -u
           if [ "${{ steps.auth.outputs.AUTH_STATUS }}" != "ok" ]; then
@@ -235,5 +235,5 @@ jobs:
         with:
           name: salesforce-data-load-artifacts
           path: |
-            ${{ runner.temp }}/salesforce-artifacts/
+            /tmp/salesforce-artifacts/
           if-no-files-found: error
