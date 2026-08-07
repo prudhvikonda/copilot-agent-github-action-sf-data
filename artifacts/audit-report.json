@@ -1,0 +1,27 @@
+{
+  "workflow_name": "demo",
+  "workflow_run_id": "1",
+  "execution_timestamp": "2026-08-07T06:03:29Z",
+  "trigger_type": "manual",
+  "github_user": "demo",
+  "pr_number": "1",
+  "github_commit_sha": "local",
+  "approver": "demo",
+  "source_file_name": "data/account-names.csv",
+  "salesforce_org_alias": "prod-integration",
+  "salesforce_instance_url": "https://login.salesforce.com",
+  "records_processed": 3,
+  "valid_records": 3,
+  "invalid_records": 0,
+  "duplicate_records": 0,
+  "successfully_inserted_records": 0,
+  "failed_records": 0,
+  "salesforce_job_information": {
+    "tool": "sf data create record",
+    "operation": "insert",
+    "sobject": "Account"
+  },
+  "error_details": [],
+  "overall_execution_status": "succeeded",
+  "log_file": "artifacts/execution.log"
+}

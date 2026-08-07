@@ -1,0 +1,11 @@
+{
+  "source_file": "data/account-names.csv",
+  "agent_spec": ".copilot/agents/account-data-transformer.md",
+  "records_processed": 3,
+  "valid_records": 3,
+  "invalid_records": 0,
+  "duplicate_records": 0,
+  "duplicates": [],
+  "output_file": "artifacts/transformed-accounts.csv",
+  "industry_default": "Media"
+}

@@ -1,0 +1,190 @@
+name: Salesforce Account Data Load
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      data_file_path:
+        description: 'Path to the CSV file to process (for example data/account-names.csv)'
+        required: false
+        default: 'data/account-names.csv'
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: salesforce-data-load-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main')
+    runs-on: ubuntu-latest
+    environment:
+      name: PROD
+    env:
+      REPO_ROOT: ${{ github.workspace }}
+      SOURCE_FILE: data/account-names.csv
+      ARTIFACT_DIR: artifacts
+      WORKFLOW_NAME: ${{ github.workflow }}
+      WORKFLOW_RUN_ID: ${{ github.run_id }}
+      GITHUB_REF: ${{ github.ref }}
+      GITHUB_SHA: ${{ github.sha }}
+      GITHUB_USER: ${{ github.actor }}
+      GITHUB_EVENT_NAME: ${{ github.event_name }}
+      PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+      SF_ORG_ALIAS: prod-integration
+      SF_INSTANCE_URL: https://login.salesforce.com
+      APPROVER: ${{ github.actor }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Salesforce CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -sL https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-linux-x64.tar.xz -o /tmp/sf.tar.xz
+          tar -xJf /tmp/sf.tar.xz -C "$HOME/.local/bin" --strip-components=1
+          "$HOME/.local/bin/sf" version
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve and validate inputs and prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          : > artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting workflow execution" | tee -a artifacts/execution.log
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            selected_file="${{ github.event.inputs.data_file_path }}"
+            if [ -z "$selected_file" ]; then
+              selected_file="data/account-names.csv"
+            fi
+          else
+            selected_file="data/account-names.csv"
+            changed_csv="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" | grep -E '^data/.*\.csv$' | head -n 1 || true)"
+            if [ -n "$changed_csv" ]; then
+              selected_file="$changed_csv"
+            fi
+          fi
+
+          if [ ! -f "$selected_file" ]; then
+            echo "Required input file not found: $selected_file" | tee -a artifacts/execution.log
+            exit 1
+          fi
+
+          echo "SOURCE_FILE=$selected_file" >> "$GITHUB_ENV"
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Resolved source file: $selected_file" | tee -a artifacts/execution.log
+
+          if [ -z "${{ secrets.SF_CLIENT_ID }}" ] || [ -z "${{ secrets.SF_CLIENT_SECRET }}" ] || [ -z "${{ secrets.SF_LOGIN_URL }}" ]; then
+            echo "Salesforce credentials are not fully configured in GitHub Secrets." | tee -a artifacts/execution.log
+            exit 1
+          fi
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Input validation passed" | tee -a artifacts/execution.log
+
+      - name: Approval gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Approval is required via the PROD environment protection rules before Salesforce operations begin." | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Workflow will not proceed until the environment approval is granted by an authorized reviewer." | tee -a artifacts/execution.log
+
+      - name: Transform account data with Copilot agent
+        shell: bash
+        env:
+          AGENT_SPEC_FILE: .copilot/agents/account-data-transformer.md
+        run: |
+          set -euo pipefail
+          python3 scripts/transform-accounts.py \
+            --input "$SOURCE_FILE" \
+            --output artifacts/transformed-accounts.csv \
+            --summary artifacts/transformation-summary.json \
+            --log artifacts/transformation.log \
+            --agent-spec "$AGENT_SPEC_FILE" | tee -a artifacts/execution.log
+
+      - name: Authenticate to Salesforce
+        shell: bash
+        env:
+          SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+          SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
+          SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
+          SF_ORG_ALIAS: prod-integration
+          GITHUB_ENV: ${{ env.GITHUB_ENV }}
+        run: |
+          set -euo pipefail
+          bash scripts/authenticate-salesforce.sh | tee -a artifacts/execution.log
+
+      - name: Load accounts into Salesforce
+        shell: bash
+        env:
+          INPUT_FILE: artifacts/transformed-accounts.csv
+          OUTPUT_FILE: artifacts/salesforce-import-results.json
+        run: |
+          set -euo pipefail
+          bash scripts/load-accounts.sh | tee -a artifacts/execution.log
+
+      - name: Generate audit report
+        shell: bash
+        env:
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          TRIGGER_TYPE: ${{ github.event_name }}
+          GITHUB_USER: ${{ github.actor }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          GITHUB_SHA: ${{ github.sha }}
+          APPROVER: ${{ github.actor }}
+          SOURCE_FILE: ${{ env.SOURCE_FILE }}
+          SF_ORG_ALIAS: prod-integration
+          SF_INSTANCE_URL: ${{ env.SF_INSTANCE_URL }}
+        run: |
+          set -euo pipefail
+          python3 scripts/generate-audit-report.py \
+            --summary artifacts/transformation-summary.json \
+            --import-results artifacts/salesforce-import-results.json \
+            --audit-file artifacts/audit-report.json \
+            --workflow-name "$WORKFLOW_NAME" \
+            --workflow-run-id "$WORKFLOW_RUN_ID" \
+            --trigger "$TRIGGER_TYPE" \
+            --github-user "$GITHUB_USER" \
+            --pr-number "$PR_NUMBER" \
+            --commit-sha "$GITHUB_SHA" \
+            --approver "$APPROVER" \
+            --source-file "$SOURCE_FILE" \
+            --org-alias "$SF_ORG_ALIAS" \
+            --instance-url "$SF_INSTANCE_URL" \
+            --log-file artifacts/execution.log | tee -a artifacts/execution.log
+
+      - name: Publish workflow summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "## Salesforce data deployment summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Workflow: $WORKFLOW_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: $GITHUB_EVENT_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source file: $SOURCE_FILE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Artifacts: transformed-accounts.csv, transformation-summary.json, salesforce-import-results.json, audit-report.json, execution.log" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.4.0
+        with:
+          name: salesforce-data-load-artifacts
+          path: |
+            artifacts/
+            !artifacts/.gitkeep
+          if-no-files-found: error
