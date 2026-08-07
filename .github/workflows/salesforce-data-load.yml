@@ -53,15 +53,18 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup Node.js for Salesforce CLI
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install Salesforce CLI
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.local/bin"
-          curl -sL https://developer.salesforce.com/media/salesforce-cli/sf/channels/stable/sf-linux-x64.tar.xz -o /tmp/sf.tar.xz
-          tar -xJf /tmp/sf.tar.xz -C "$HOME/.local/bin" --strip-components=1
-          "$HOME/.local/bin/sf" version
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          npm install -g @salesforce/cli
+          sf --version
+          echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
 
       - name: Resolve and validate inputs and prerequisites
         shell: bash
