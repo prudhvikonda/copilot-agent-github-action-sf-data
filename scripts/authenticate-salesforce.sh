@@ -24,6 +24,7 @@ TOKEN_RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$TOKEN_RESPONSE_FILE"' EXIT
 
 HTTP_STATUS="$(curl -sS -X POST "$TOKEN_ENDPOINT" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
   -d "grant_type=client_credentials" \
   -d "client_id=$SF_CLIENT_ID" \
   -d "client_secret=$SF_CLIENT_SECRET" \
@@ -62,12 +63,14 @@ if [ -z "$ACCESS_TOKEN" ] || [ -z "$INSTANCE_URL" ]; then
   exit 1
 fi
 
+export SF_ACCESS_TOKEN="$ACCESS_TOKEN"
+
 if ! command -v sf >/dev/null 2>&1; then
   echo "$LOG_PREFIX Salesforce CLI not found in PATH" >&2
   exit 1
 fi
 
-sf org login access-token --instance-url "$INSTANCE_URL" --access-token "$ACCESS_TOKEN" --alias "$SF_ORG_ALIAS" --set-default >/dev/null
+sf org login access-token --instance-url "$INSTANCE_URL" --access-token "$SF_ACCESS_TOKEN" --alias "$SF_ORG_ALIAS" --set-default --no-prompt >/dev/null
 
 echo "$LOG_PREFIX Salesforce CLI authentication completed"
 
