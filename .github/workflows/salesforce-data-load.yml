@@ -31,7 +31,7 @@ jobs:
     env:
       REPO_ROOT: ${{ github.workspace }}
       SOURCE_FILE: data/account-names.csv
-      ARTIFACT_DIR: artifacts
+      ARTIFACT_DIR: ${{ runner.temp }}/salesforce-artifacts
       WORKFLOW_NAME: ${{ github.workflow }}
       WORKFLOW_RUN_ID: ${{ github.run_id }}
       GITHUB_REF: ${{ github.ref }}
@@ -70,9 +70,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p artifacts
-          : > artifacts/execution.log
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting workflow execution" | tee -a artifacts/execution.log
+          mkdir -p "$ARTIFACT_DIR"
+          : > "$ARTIFACT_DIR/execution.log"
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting workflow execution" | tee -a "$ARTIFACT_DIR/execution.log"
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             selected_file="${{ github.event.inputs.data_file_path }}"
@@ -88,25 +88,25 @@ jobs:
           fi
 
           if [ ! -f "$selected_file" ]; then
-            echo "Required input file not found: $selected_file" | tee -a artifacts/execution.log
+            echo "Required input file not found: $selected_file" | tee -a "$ARTIFACT_DIR/execution.log"
             exit 1
           fi
 
           echo "SOURCE_FILE=$selected_file" >> "$GITHUB_ENV"
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Resolved source file: $selected_file" | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Resolved source file: $selected_file" | tee -a "$ARTIFACT_DIR/execution.log"
 
           if [ -z "${{ secrets.SF_CLIENT_ID }}" ] || [ -z "${{ secrets.SF_CLIENT_SECRET }}" ] || [ -z "${{ secrets.SF_LOGIN_URL }}" ]; then
-            echo "Salesforce credentials are not fully configured in GitHub Secrets." | tee -a artifacts/execution.log
+            echo "Salesforce credentials are not fully configured in GitHub Secrets." | tee -a "$ARTIFACT_DIR/execution.log"
             exit 1
           fi
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Input validation passed" | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Input validation passed" | tee -a "$ARTIFACT_DIR/execution.log"
 
       - name: Approval gate
         shell: bash
         run: |
           set -euo pipefail
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Approval is required via the PROD environment protection rules before Salesforce operations begin." | tee -a artifacts/execution.log
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Workflow will not proceed until the environment approval is granted by an authorized reviewer." | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Approval is required via the PROD environment protection rules before Salesforce operations begin." | tee -a "$ARTIFACT_DIR/execution.log"
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Workflow will not proceed until the environment approval is granted by an authorized reviewer." | tee -a "$ARTIFACT_DIR/execution.log"
 
       - name: Transform account data with Copilot agent
         shell: bash
@@ -116,10 +116,10 @@ jobs:
           set -euo pipefail
           python3 scripts/transform-accounts.py \
             --input "$SOURCE_FILE" \
-            --output artifacts/transformed-accounts.csv \
-            --summary artifacts/transformation-summary.json \
-            --log artifacts/transformation.log \
-            --agent-spec "$AGENT_SPEC_FILE" | tee -a artifacts/execution.log
+            --output "$ARTIFACT_DIR/transformed-accounts.csv" \
+            --summary "$ARTIFACT_DIR/transformation-summary.json" \
+            --log "$ARTIFACT_DIR/transformation.log" \
+            --agent-spec "$AGENT_SPEC_FILE" | tee -a "$ARTIFACT_DIR/execution.log"
 
       - name: Authenticate to Salesforce
         id: auth
@@ -131,7 +131,7 @@ jobs:
           SF_ORG_ALIAS: prod-integration
         run: |
           set -u
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Fetching Salesforce access token" | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Fetching Salesforce access token" | tee -a "$ARTIFACT_DIR/execution.log"
           set +e
           export SF_ACCESS_TOKEN="$(curl -sS -X POST "$SF_LOGIN_URL/services/oauth2/token" \
             -H 'Content-Type: application/x-www-form-urlencoded' \
@@ -142,19 +142,19 @@ jobs:
           set -e
 
           if [ "$auth_status" -ne 0 ] || [ -z "$SF_ACCESS_TOKEN" ]; then
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Failed to retrieve Salesforce access token" | tee -a artifacts/execution.log
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Failed to retrieve Salesforce access token" | tee -a "$ARTIFACT_DIR/execution.log"
             echo "AUTH_STATUS=failed" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Authorizing to Salesforce org" | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Authorizing to Salesforce org" | tee -a "$ARTIFACT_DIR/execution.log"
           set +e
-          sf org login access-token --instance-url "$SF_LOGIN_URL" --access-token "$SF_ACCESS_TOKEN" --alias "$SF_ORG_ALIAS" --set-default --no-prompt | tee -a artifacts/execution.log
+          sf org login access-token --instance-url "$SF_LOGIN_URL" --access-token "$SF_ACCESS_TOKEN" --alias "$SF_ORG_ALIAS" --set-default --no-prompt | tee -a "$ARTIFACT_DIR/execution.log"
           auth_status=$?
           set -e
 
           if [ "$auth_status" -ne 0 ]; then
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Salesforce CLI login failed" | tee -a artifacts/execution.log
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Salesforce CLI login failed" | tee -a "$ARTIFACT_DIR/execution.log"
             echo "AUTH_STATUS=failed" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -166,23 +166,23 @@ jobs:
       - name: Load accounts into Salesforce
         shell: bash
         env:
-          INPUT_FILE: artifacts/transformed-accounts.csv
-          OUTPUT_FILE: artifacts/salesforce-import-results.json
+          INPUT_FILE: ${{ runner.temp }}/salesforce-artifacts/transformed-accounts.csv
+          OUTPUT_FILE: ${{ runner.temp }}/salesforce-artifacts/salesforce-import-results.json
         run: |
           set -u
           if [ "${{ steps.auth.outputs.AUTH_STATUS }}" != "ok" ]; then
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Skipping Salesforce load because authentication did not complete successfully" | tee -a artifacts/execution.log
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Skipping Salesforce load because authentication did not complete successfully" | tee -a "$ARTIFACT_DIR/execution.log"
             echo '{"source_file":"'"$INPUT_FILE"'","sobject":"Account","operation":"insert","records_processed":0,"successful_records":0,"failed_records":0,"records":[],"job_information":{"tool":"sf data create record","operation":"insert","sobject":"Account"}}' > "$OUTPUT_FILE"
             exit 0
           fi
 
           set +e
-          bash scripts/load-accounts.sh | tee -a artifacts/execution.log
+          bash scripts/load-accounts.sh | tee -a "$ARTIFACT_DIR/execution.log"
           load_status=$?
           set -e
 
           if [ "$load_status" -ne 0 ]; then
-            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Salesforce load step failed" | tee -a artifacts/execution.log
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Salesforce load step failed" | tee -a "$ARTIFACT_DIR/execution.log"
             exit 0
           fi
 
@@ -203,9 +203,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/generate-audit-report.py \
-            --summary artifacts/transformation-summary.json \
-            --import-results artifacts/salesforce-import-results.json \
-            --audit-file artifacts/audit-report.json \
+            --summary "$ARTIFACT_DIR/transformation-summary.json" \
+            --import-results "$ARTIFACT_DIR/salesforce-import-results.json" \
+            --audit-file "$ARTIFACT_DIR/audit-report.json" \
             --workflow-name "$WORKFLOW_NAME" \
             --workflow-run-id "$WORKFLOW_RUN_ID" \
             --trigger "$TRIGGER_TYPE" \
@@ -216,7 +216,7 @@ jobs:
             --source-file "$SOURCE_FILE" \
             --org-alias "$SF_ORG_ALIAS" \
             --instance-url "$SF_INSTANCE_URL" \
-            --log-file artifacts/execution.log | tee -a artifacts/execution.log
+            --log-file "$ARTIFACT_DIR/execution.log" | tee -a "$ARTIFACT_DIR/execution.log"
 
       - name: Publish workflow summary
         if: ${{ always() }}
@@ -235,6 +235,5 @@ jobs:
         with:
           name: salesforce-data-load-artifacts
           path: |
-            artifacts/
-            !artifacts/.gitkeep
+            ${{ runner.temp }}/salesforce-artifacts/
           if-no-files-found: error
