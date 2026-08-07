@@ -187,6 +187,7 @@ jobs:
           fi
 
       - name: Generate audit report
+        if: ${{ always() }}
         shell: bash
         env:
           WORKFLOW_NAME: ${{ github.workflow }}
@@ -218,6 +219,7 @@ jobs:
             --log-file artifacts/execution.log | tee -a artifacts/execution.log
 
       - name: Publish workflow summary
+        if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -228,6 +230,7 @@ jobs:
           echo "- Artifacts: transformed-accounts.csv, transformation-summary.json, salesforce-import-results.json, audit-report.json, execution.log" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4.4.0
         with:
           name: salesforce-data-load-artifacts
