@@ -54,9 +54,9 @@ jobs:
           python-version: '3.11'
 
       - name: Setup Node.js for Salesforce CLI
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: 22.4.1
 
       - name: Install Salesforce CLI
         shell: bash
