@@ -128,10 +128,24 @@ jobs:
           SF_CLIENT_SECRET: ${{ secrets.SF_CLIENT_SECRET }}
           SF_LOGIN_URL: ${{ secrets.SF_LOGIN_URL }}
           SF_ORG_ALIAS: prod-integration
-          GITHUB_ENV: ${{ env.GITHUB_ENV }}
         run: |
           set -euo pipefail
-          bash scripts/authenticate-salesforce.sh | tee -a artifacts/execution.log
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Fetching Salesforce access token" | tee -a artifacts/execution.log
+          export SF_ACCESS_TOKEN="$(curl -sS -X POST "$SF_LOGIN_URL/services/oauth2/token" \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            -d "grant_type=client_credentials" \
+            -d "client_id=$SF_CLIENT_ID" \
+            -d "client_secret=$SF_CLIENT_SECRET" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')"
+
+          if [ -z "$SF_ACCESS_TOKEN" ]; then
+            echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Failed to retrieve Salesforce access token" | tee -a artifacts/execution.log
+            exit 1
+          fi
+
+          echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Authorizing to Salesforce org" | tee -a artifacts/execution.log
+          sf org login access-token --instance-url "$SF_LOGIN_URL" --access-token "$SF_ACCESS_TOKEN" --alias "$SF_ORG_ALIAS" --set-default --no-prompt | tee -a artifacts/execution.log
+          echo "SF_INSTANCE_URL=$SF_LOGIN_URL" >> "$GITHUB_ENV"
+          echo "SF_ORG_ALIAS=$SF_ORG_ALIAS" >> "$GITHUB_ENV"
 
       - name: Load accounts into Salesforce
         shell: bash
